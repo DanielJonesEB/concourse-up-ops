@@ -14,7 +14,7 @@ variable "gcpcredentialsjson" {
   type = "string"
 	default = "{{ .GCPCredentialsJSON }}"
 }
-variable "externalip" {
+variable "source_access_ip" {
   type = "string"
 	default = "{{ .ExternalIP }}"
 }
@@ -164,6 +164,56 @@ resource "google_compute_firewall" "external" {
     protocol = "icmp"
   }
 }
+resource "google_compute_firewall" "director" {
+  name = "${var.deployment}-director"
+  description = "BOSH director can only be accessed by nat and source IP"
+  network     = "${google_compute_network.default.self_link}"
+  destination_ranges = ["${google_compute_address.director.address}/32"]
+  source_ranges = ["${var.source_access_ip}/32","${google_compute_instance.nat-instance.network_interface.0.access_config.0.nat_ip}/32" ]
+  allow {
+    protocol = "tcp"
+    ports = ["6868", "25555", "22"]
+  }
+}
+
+resource "google_compute_firewall" "atc" {
+  name = "${var.deployment}-atc"
+  description = "ATC can be accessed from allowed IPS, and all VMs in deployment"
+  network     = "${google_compute_network.default.self_link}"
+  destination_ranges = ["${google_compute_address.atc_ip.address}/32"]
+  source_ranges = ["${google_compute_address.director.address}/32","${google_compute_address.atc_ip.address}/32", "${google_compute_instance.nat-instance.network_interface.0.access_config.0.nat_ip}/32" ]
+  target_tags = ["external", "internal"]
+
+  allow {
+    protocol = "tcp"
+    ports = ["80", "443", "3000", "8844", "8443" ]
+  }
+}
+
+resource "google_compute_firewall" "vms" {
+  name = "${var.deployment}-vms"
+  description = "Allows BOSH director communicate with the VMs"
+  network     = "${google_compute_network.default.self_link}"
+  destination_ranges = ["${google_compute_address.director.address}/32"]
+  
+  source_ranges = ["10.0.0.0/16"]
+  allow {
+  protocol = "tcp"
+  ports = ["6868", "4222", "25250", "25555", "25777", "2222", "5555", "7777", "7788", "7799"]
+  }
+
+  allow {
+    protocol = "icmp"
+    ports = ["0"]
+  }
+
+  allow {
+    protocol = "udp"
+    ports = ["53"]
+  }
+
+}
+
 resource "google_compute_firewall" "temporary" {
   name        = "${var.deployment}-temporary"
   description = "Temporarily allows all traffic - will need to be restricted"
